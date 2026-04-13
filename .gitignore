@@ -2,3 +2,8 @@ node_modules/
 .env
 *.credentials.json
 *.keys.json
+docs/design-md/
+docs/*.pptx
+docs/*.json
+docs/confluence_*
+docs/consulting_*
