@@ -178,23 +178,23 @@
       <h1>퍼플식스 스튜디오 KGI 대시보드</h1>
       <div class="subtitle">주간 핵심 지표 현황</div>
     </div>
-    <div class="updated">업데이트: 2026. 4. 13. PM 2:51:38</div>
+    <div class="updated">업데이트: 2026. 4. 20. AM 11:55:57</div>
   </div>
 
   <!-- KPI Cards -->
-  <div class="section-title">최신 주차 — 2026-W15 &nbsp;|&nbsp; 2026-04-06 ~ 2026-04-12</div>
+  <div class="section-title">최신 주차 — 2026-W16 &nbsp;|&nbsp; 2026-04-13 ~ 2026-04-19</div>
   <div class="kpi-grid">
 
     <div class="kpi-card blue">
       <div class="kpi-label">홈페이지 주간 유입</div>
-      <div class="kpi-value blue">410<span class="kpi-unit">명</span></div>
+      <div class="kpi-value blue">687<span class="kpi-unit">명</span></div>
       <div class="kpi-delta">
-        <span class="badge down">
-          -143
+        <span class="badge up">
+          +277
         </span>
-        <span class="sub">-25.9% 전주 대비</span>
+        <span class="sub">+67.6% 전주 대비</span>
       </div>
-      <div class="kpi-period">월간 누적 410명</div>
+      <div class="kpi-period">월간 누적 1,097명</div>
     </div>
 
     <div class="kpi-card green">
@@ -205,10 +205,10 @@
 
     <div class="kpi-card purple">
       <div class="kpi-label">뉴스레터 구독자</div>
-      <div class="kpi-value purple">3,002<span class="kpi-unit">명</span></div>
+      <div class="kpi-value purple">3,127<span class="kpi-unit">명</span></div>
       <div class="kpi-delta">
         <span class="badge up">
-          +28
+          +138
         </span>
         <span class="sub">전주 대비</span>
       </div>
@@ -216,10 +216,10 @@
 
     <div class="kpi-card red">
       <div class="kpi-label">유튜브 구독자</div>
-      <div class="kpi-value red">8,690<span class="kpi-unit">명</span></div>
+      <div class="kpi-value red">9,040<span class="kpi-unit">명</span></div>
       <div class="kpi-delta">
         <span class="badge up">
-          +179
+          +350
         </span>
         <span class="sub">전주 대비</span>
       </div>
@@ -315,6 +315,18 @@
         <tbody>
           
           <tr class="latest">
+            <td>W16</td>
+            <td>04-13 ~ 04-19</td>
+            <td>687</td>
+            <td class="pos">+277</td>
+            <td>1,097</td>
+            <td>0</td>
+            <td>3,127</td>
+            <td class="pos">+138</td>
+            <td>9,040</td>
+            <td class="pos">+350</td>
+          </tr>
+          <tr class="">
             <td>W15</td>
             <td>04-06 ~ 04-12</td>
             <td>410</td>
@@ -495,7 +507,7 @@ Chart.defaults.borderColor = '#2c2c2e';
 Chart.defaults.font.family = "-apple-system, 'Apple SD Gothic Neo', 'Pretendard', sans-serif";
 Chart.defaults.font.size = 12;
 
-const weekLabels = ["W02","W03","W04","W05","W06","W07","W08","W09","W10","W11","W12","W13","W14","W15"];
+const weekLabels = ["W02","W03","W04","W05","W06","W07","W08","W09","W10","W11","W12","W13","W14","W15","W16"];
 const monthLabels = ["1월","2월","3월","4월"];
 
 // ── 홈페이지 주간 유입 (복합: 막대 + 꺾은선)
@@ -506,7 +518,7 @@ new Chart(document.getElementById('chartWebWeekly'), {
       {
         type: 'bar',
         label: '주간 유입수',
-        data: [556,467,552,388,492,548,332,1342,1764,1731,1376,607,553,410],
+        data: [556,467,552,388,492,548,332,1342,1764,1731,1376,607,553,410,687],
         backgroundColor: 'rgba(10,132,255,0.3)',
         borderColor: '#0a84ff',
         borderWidth: 1.5,
@@ -516,7 +528,7 @@ new Chart(document.getElementById('chartWebWeekly'), {
       {
         type: 'line',
         label: '전주 대비',
-        data: [259,-89,85,-164,104,56,-216,1010,422,-33,-355,-769,-54,-143],
+        data: [259,-89,85,-164,104,56,-216,1010,422,-33,-355,-769,-54,-143,277],
         borderColor: '#ffd60a',
         backgroundColor: 'rgba(255,214,10,0.1)',
         borderWidth: 2,
@@ -547,7 +559,7 @@ new Chart(document.getElementById('chartNlWeekly'), {
     labels: weekLabels,
     datasets: [{
       label: '구독자 수',
-      data: [1936,1943,1955,1959,1969,1986,1988,2027,2073,2106,2934,2940,2974,3002],
+      data: [1936,1943,1955,1959,1969,1986,1988,2027,2073,2106,2934,2940,2974,3002,3127],
       borderColor: '#bf5af2',
       backgroundColor: 'rgba(191,90,242,0.1)',
       borderWidth: 2.5,
@@ -574,7 +586,7 @@ new Chart(document.getElementById('chartYtWeekly'), {
     labels: weekLabels,
     datasets: [{
       label: '구독자 수',
-      data: [6566,6716,6809,6978,7130,7301,7406,7482,7558,7659,8070,8251,8511,8690],
+      data: [6566,6716,6809,6978,7130,7301,7406,7482,7558,7659,8070,8251,8511,8690,9040],
       borderColor: '#ff453a',
       backgroundColor: 'rgba(255,69,58,0.1)',
       borderWidth: 2.5,
@@ -595,7 +607,7 @@ new Chart(document.getElementById('chartYtWeekly'), {
 });
 
 // ── 뉴스레터 순증분
-const nlDiffData = [4,7,12,4,10,17,2,39,46,33,828,6,34,28];
+const nlDiffData = [4,7,12,4,10,17,2,39,46,33,828,6,34,28,138];
 new Chart(document.getElementById('chartNlDiff'), {
   type: 'bar',
   data: {
@@ -620,7 +632,7 @@ new Chart(document.getElementById('chartNlDiff'), {
 });
 
 // ── 유튜브 순증분
-const ytDiffData = [176,150,93,169,152,171,105,76,76,101,411,181,260,179];
+const ytDiffData = [176,150,93,169,152,171,105,76,76,101,411,181,260,179,350];
 new Chart(document.getElementById('chartYtDiff'), {
   type: 'bar',
   data: {
@@ -651,7 +663,7 @@ new Chart(document.getElementById('chartMonthly'), {
     labels: monthLabels,
     datasets: [{
       label: '월간 누적 유입',
-      data: [1963,2714,6031,410],
+      data: [1963,2714,6031,1097],
       backgroundColor: 'rgba(10,132,255,0.45)',
       borderColor: '#0a84ff',
       borderWidth: 1.5,
