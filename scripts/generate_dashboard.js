@@ -1,4 +1,161 @@
-<!DOCTYPE html>
+/**
+ * 퍼플식스 스튜디오 KGI 대시보드 HTML 생성기
+ *
+ * Google Sheets KGI 주간 시트 데이터를 읽어 dashboard/index.html 생성
+ * 실행: node scripts/generate_dashboard.js
+ */
+
+require('dotenv').config({ path: require('path').join(__dirname, '../.env') });
+const { google } = require('googleapis');
+const fs = require('fs');
+const path = require('path');
+
+const OAUTH_KEYS_PATH  = 'C:\\Users\\유효영\\.claude\\gcp-oauth.keys.json';
+const WRITE_TOKEN_PATH = 'C:\\Users\\유효영\\.claude\\.gdrive-write-credentials.json';
+const SHEETS_ID = '1wx0OvGgl4m-t7lQLqahi9JKZA5adJzXtglYVVWB6JE8';
+const SHEET_NAME = 'KGI 주간';
+const OUTPUT_PATH = path.join(__dirname, '../docs/index.html');
+
+// ── 2026 연간 KPI 목표 ────────────────────────────────────────────────────────
+const KPI_TARGETS = {
+  web: 24000,   // 연간 누적 홈페이지 유입수
+  nl:   5000,   // 뉴스레터 구독자
+  yt:  20000,   // 유튜브 구독자
+};
+
+function makeClient() {
+  const keys = JSON.parse(fs.readFileSync(OAUTH_KEYS_PATH)).installed;
+  const client = new google.auth.OAuth2(keys.client_id, keys.client_secret, 'http://localhost:3000/oauth2callback');
+  client.setCredentials(JSON.parse(fs.readFileSync(WRITE_TOKEN_PATH)));
+  return client;
+}
+
+async function fetchSheetData() {
+  const client = makeClient();
+  const sheets = google.sheets({ version: 'v4', auth: client });
+  const res = await sheets.spreadsheets.values.get({
+    spreadsheetId: SHEETS_ID,
+    range: `${SHEET_NAME}!A2:K`,
+  });
+  return res.data.values || [];
+}
+
+function processData(rows) {
+  const weekly = rows
+    .filter(r => r[0] && r[1])
+    .sort((a, b) => a[0].localeCompare(b[0]))
+    .map(r => ({
+      week:       r[0],   // "2026-W02"
+      period:     r[1],   // "2026-01-05 ~ 2026-01-11"
+      webSessions: Number(r[2]) || 0,
+      webDiff:    Number(r[3]) || 0,
+      webMonthly: Number(r[4]) || 0,
+      consult:    r[5] !== undefined && r[5] !== '' ? Number(r[5]) : null,
+      nlSubs:     Number(r[6]) || 0,
+      nlDiff:     Number(r[7]) || 0,
+      ytSubs:     Number(r[8]) || 0,
+      ytDiff:     Number(r[9]) || 0,
+    }));
+
+  // 월별 집계: 주차 시작일 기준, 해당 월의 마지막 누적값 사용
+  const monthMap = {};
+  for (const d of weekly) {
+    const startDate = d.period.split(' ~ ')[0]?.trim();
+    const month = startDate?.substring(0, 7); // "YYYY-MM"
+    if (!month) continue;
+    if (!monthMap[month] || d.webMonthly > (monthMap[month].webMonthly || 0)) {
+      monthMap[month] = { month, webMonthly: d.webMonthly };
+    }
+  }
+  const monthly = Object.values(monthMap).sort((a, b) => a.month.localeCompare(b.month));
+
+  // 연간 누적 웹 유입 (각 월의 최대 webMonthly 합산)
+  const webAnnual = monthly.reduce((sum, m) => sum + m.webMonthly, 0);
+
+  return { weekly, monthly, webAnnual };
+}
+
+function monthLabel(m) {
+  const [, mm] = m.split('-');
+  return `${Number(mm)}월`;
+}
+
+function weekLabel(w) {
+  return w.replace('2026-', ''); // "W02"
+}
+
+function sign(n) {
+  if (n === null || n === undefined) return '—';
+  return n > 0 ? `+${n.toLocaleString()}` : n.toLocaleString();
+}
+
+function generateHTML(data) {
+  const { weekly, monthly, webAnnual } = data;
+  const latest = weekly[weekly.length - 1];
+  const prev = weekly[weekly.length - 2];
+
+  const webDiffPct = prev && prev.webSessions
+    ? ((latest.webSessions - prev.webSessions) / prev.webSessions * 100).toFixed(1)
+    : null;
+
+  const now = new Date().toLocaleString('ko-KR');
+
+  // ── KPI 달성율 계산 ─────────────────────────────────────────────────────────
+  const yearStart = new Date(new Date().getFullYear(), 0, 1);
+  const yearEnd   = new Date(new Date().getFullYear(), 11, 31, 23, 59, 59);
+  const yearPct   = (new Date() - yearStart) / (yearEnd - yearStart) * 100;
+
+  function kpiBlock({ id, label, icon, current, target, color, gradFrom, gradTo }) {
+    const pct = Math.min(current / target * 100, 100);
+    const isAhead = pct >= yearPct;
+    const noData  = current === 0;
+    const remaining = (target - current).toLocaleString();
+    const statusText = noData
+      ? '데이터 없음'
+      : isAhead
+        ? `▲ 페이스 초과 · 잔여 ${remaining} 달성 시 완료`
+        : `▼ 페이스 대비 ${(yearPct - pct).toFixed(1)}%p 지연 · 잔여 ${remaining} 필요`;
+    const statusColor = noData ? '#636366' : isAhead ? '#30d158' : '#ff9f0a';
+
+    return `
+    <div class="kpi-goal-card" style="border-top: 3px solid ${gradFrom}">
+      <div class="kpi-goal-name">${icon} ${label}</div>
+      <div class="kpi-goal-nums">
+        <span class="kpi-goal-current" style="color:${color}">${noData ? '—' : current.toLocaleString()}</span>
+        <span class="kpi-goal-sep"> / </span>
+        <span class="kpi-goal-target">목표 ${target.toLocaleString()}</span>
+        <span class="kpi-goal-pct" style="color:${color}">${noData ? '—' : pct.toFixed(1) + '%'}</span>
+      </div>
+      <div class="progress-bar-bg">
+        <div class="progress-bar-fill" style="width:${noData ? 0 : pct}%;background:linear-gradient(90deg,${gradFrom},${gradTo})"></div>
+        <div class="progress-bar-pace" style="left:${yearPct.toFixed(1)}%"></div>
+      </div>
+      <div class="kpi-goal-status" style="color:${statusColor}">${statusText}</div>
+      <div class="kpi-goal-pace-label">연도 경과 ${yearPct.toFixed(0)}% 기준 (페이스 마커 ▏)</div>
+    </div>`;
+  }
+
+  const kpiSection = `
+  <!-- 2026 KPI 목표 달성율 -->
+  <div class="section-title" style="margin-top:0">2026 KPI 목표 달성율</div>
+  <div class="kpi-goal-row">
+    ${kpiBlock({ id:'web', label:'연간 누적 홈페이지 유입수', icon:'🌐', current: webAnnual, target: KPI_TARGETS.web, color:'#0a84ff', gradFrom:'#0a84ff', gradTo:'#5ac8fa' })}
+    ${kpiBlock({ id:'nl',  label:'뉴스레터 구독자', icon:'📧', current: latest.nlSubs, target: KPI_TARGETS.nl, color:'#bf5af2', gradFrom:'#bf5af2', gradTo:'#da8fff' })}
+    ${kpiBlock({ id:'yt',  label:'퍼플식스 TV 유튜브 구독자', icon:'▶️', current: latest.ytSubs, target: KPI_TARGETS.yt, color:'#ff453a', gradFrom:'#ff453a', gradTo:'#ff6b6b' })}
+  </div>`;
+
+  // chart data
+  const weekLabels = JSON.stringify(weekly.map(d => weekLabel(d.week)));
+  const webSessionsData = JSON.stringify(weekly.map(d => d.webSessions));
+  const nlSubsData = JSON.stringify(weekly.map(d => d.nlSubs));
+  const ytSubsData = JSON.stringify(weekly.map(d => d.ytSubs));
+  const nlDiffData = JSON.stringify(weekly.map(d => d.nlDiff));
+  const ytDiffData = JSON.stringify(weekly.map(d => d.ytDiff));
+  const webDiffData = JSON.stringify(weekly.map(d => d.webDiff));
+  const monthLabels = JSON.stringify(monthly.map(d => monthLabel(d.month)));
+  const monthWebData = JSON.stringify(monthly.map(d => d.webMonthly));
+
+  return `<!DOCTYPE html>
 <html lang="ko">
 <head>
 <meta charset="UTF-8">
@@ -209,91 +366,39 @@
       <h1>퍼플식스 스튜디오 KGI 대시보드</h1>
       <div class="subtitle">주간 핵심 지표 현황</div>
     </div>
-    <div class="updated">업데이트: 2026. 5. 8. AM 11:24:25</div>
+    <div class="updated">업데이트: ${now}</div>
   </div>
 
-  
-  <!-- 2026 KPI 목표 달성율 -->
-  <div class="section-title" style="margin-top:0">2026 KPI 목표 달성율</div>
-  <div class="kpi-goal-row">
-    
-    <div class="kpi-goal-card" style="border-top: 3px solid #0a84ff">
-      <div class="kpi-goal-name">🌐 연간 누적 홈페이지 유입수</div>
-      <div class="kpi-goal-nums">
-        <span class="kpi-goal-current" style="color:#0a84ff">12,382</span>
-        <span class="kpi-goal-sep"> / </span>
-        <span class="kpi-goal-target">목표 24,000</span>
-        <span class="kpi-goal-pct" style="color:#0a84ff">51.6%</span>
-      </div>
-      <div class="progress-bar-bg">
-        <div class="progress-bar-fill" style="width:51.59166666666667%;background:linear-gradient(90deg,#0a84ff,#5ac8fa)"></div>
-        <div class="progress-bar-pace" style="left:34.9%"></div>
-      </div>
-      <div class="kpi-goal-status" style="color:#30d158">▲ 페이스 초과 · 잔여 11,618 달성 시 완료</div>
-      <div class="kpi-goal-pace-label">연도 경과 35% 기준 (페이스 마커 ▏)</div>
-    </div>
-    
-    <div class="kpi-goal-card" style="border-top: 3px solid #bf5af2">
-      <div class="kpi-goal-name">📧 뉴스레터 구독자</div>
-      <div class="kpi-goal-nums">
-        <span class="kpi-goal-current" style="color:#bf5af2">3,146</span>
-        <span class="kpi-goal-sep"> / </span>
-        <span class="kpi-goal-target">목표 5,000</span>
-        <span class="kpi-goal-pct" style="color:#bf5af2">62.9%</span>
-      </div>
-      <div class="progress-bar-bg">
-        <div class="progress-bar-fill" style="width:62.92%;background:linear-gradient(90deg,#bf5af2,#da8fff)"></div>
-        <div class="progress-bar-pace" style="left:34.9%"></div>
-      </div>
-      <div class="kpi-goal-status" style="color:#30d158">▲ 페이스 초과 · 잔여 1,854 달성 시 완료</div>
-      <div class="kpi-goal-pace-label">연도 경과 35% 기준 (페이스 마커 ▏)</div>
-    </div>
-    
-    <div class="kpi-goal-card" style="border-top: 3px solid #ff453a">
-      <div class="kpi-goal-name">▶️ 퍼플식스 TV 유튜브 구독자</div>
-      <div class="kpi-goal-nums">
-        <span class="kpi-goal-current" style="color:#ff453a">9,260</span>
-        <span class="kpi-goal-sep"> / </span>
-        <span class="kpi-goal-target">목표 20,000</span>
-        <span class="kpi-goal-pct" style="color:#ff453a">46.3%</span>
-      </div>
-      <div class="progress-bar-bg">
-        <div class="progress-bar-fill" style="width:46.300000000000004%;background:linear-gradient(90deg,#ff453a,#ff6b6b)"></div>
-        <div class="progress-bar-pace" style="left:34.9%"></div>
-      </div>
-      <div class="kpi-goal-status" style="color:#30d158">▲ 페이스 초과 · 잔여 10,740 달성 시 완료</div>
-      <div class="kpi-goal-pace-label">연도 경과 35% 기준 (페이스 마커 ▏)</div>
-    </div>
-  </div>
+  ${kpiSection}
 
   <!-- KPI Cards -->
-  <div class="section-title">최신 주차 — 2026-W18 &nbsp;|&nbsp; 2026-04-26 ~ 2026-05-02</div>
+  <div class="section-title">최신 주차 — ${latest.week} &nbsp;|&nbsp; ${latest.period}</div>
   <div class="kpi-grid">
 
     <div class="kpi-card blue">
       <div class="kpi-label">홈페이지 주간 유입</div>
-      <div class="kpi-value blue">280<span class="kpi-unit">명</span></div>
+      <div class="kpi-value blue">${latest.webSessions.toLocaleString()}<span class="kpi-unit">명</span></div>
       <div class="kpi-delta">
-        <span class="badge down">
-          -17
+        <span class="badge ${latest.webDiff > 0 ? 'up' : latest.webDiff < 0 ? 'down' : 'flat'}">
+          ${sign(latest.webDiff)}
         </span>
-        <span class="sub">-5.7% 전주 대비</span>
+        ${webDiffPct !== null ? `<span class="sub">${webDiffPct > 0 ? '+' : ''}${webDiffPct}% 전주 대비</span>` : ''}
       </div>
-      <div class="kpi-period">월간 누적 1,674명</div>
+      <div class="kpi-period">월간 누적 ${latest.webMonthly.toLocaleString()}명</div>
     </div>
 
     <div class="kpi-card green">
       <div class="kpi-label">상담 신청수</div>
-      <div class="kpi-value green">0<span class="kpi-unit">건</span></div>
+      <div class="kpi-value green">${latest.consult !== null ? latest.consult.toLocaleString() : '—'}<span class="kpi-unit">${latest.consult !== null ? '건' : ''}</span></div>
       <div class="kpi-delta"><span class="sub">Salesforce 기준</span></div>
     </div>
 
     <div class="kpi-card purple">
       <div class="kpi-label">뉴스레터 구독자</div>
-      <div class="kpi-value purple">3,146<span class="kpi-unit">명</span></div>
+      <div class="kpi-value purple">${latest.nlSubs.toLocaleString()}<span class="kpi-unit">명</span></div>
       <div class="kpi-delta">
-        <span class="badge up">
-          +7
+        <span class="badge ${latest.nlDiff > 0 ? 'up' : latest.nlDiff < 0 ? 'down' : 'flat'}">
+          ${sign(latest.nlDiff)}
         </span>
         <span class="sub">전주 대비</span>
       </div>
@@ -301,10 +406,10 @@
 
     <div class="kpi-card red">
       <div class="kpi-label">유튜브 구독자</div>
-      <div class="kpi-value red">9,260<span class="kpi-unit">명</span></div>
+      <div class="kpi-value red">${latest.ytSubs.toLocaleString()}<span class="kpi-unit">명</span></div>
       <div class="kpi-delta">
-        <span class="badge up">
-          +100
+        <span class="badge ${latest.ytDiff > 0 ? 'up' : latest.ytDiff < 0 ? 'down' : 'flat'}">
+          ${sign(latest.ytDiff)}
         </span>
         <span class="sub">전주 대비</span>
       </div>
@@ -398,211 +503,19 @@
           </tr>
         </thead>
         <tbody>
-          
-          <tr class="latest">
-            <td>W18</td>
-            <td>04-26 ~ 05-02</td>
-            <td>280</td>
-            <td class="neg">-17</td>
-            <td>1,674</td>
-            <td>0</td>
-            <td>3,146</td>
-            <td class="pos">+7</td>
-            <td>9,260</td>
-            <td class="pos">+100</td>
-          </tr>
-          <tr class="">
-            <td>W17</td>
-            <td>04-19 ~ 04-25</td>
-            <td>297</td>
-            <td class="neg">-395</td>
-            <td>1,394</td>
-            <td>0</td>
-            <td>3,139</td>
-            <td class="pos">+13</td>
-            <td>9,160</td>
-            <td class="pos">+120</td>
-          </tr>
-          <tr class="">
-            <td>W16</td>
-            <td>04-13 ~ 04-19</td>
-            <td>687</td>
-            <td class="pos">+277</td>
-            <td>1,097</td>
-            <td>0</td>
-            <td>3,127</td>
-            <td class="pos">+138</td>
-            <td>9,040</td>
-            <td class="pos">+350</td>
-          </tr>
-          <tr class="">
-            <td>W15</td>
-            <td>04-06 ~ 04-12</td>
-            <td>410</td>
-            <td class="neg">-143</td>
-            <td>410</td>
-            <td>0</td>
-            <td>3,002</td>
-            <td class="pos">+28</td>
-            <td>8,690</td>
-            <td class="pos">+179</td>
-          </tr>
-          <tr class="">
-            <td>W14</td>
-            <td>03-30 ~ 04-05</td>
-            <td>553</td>
-            <td class="neg">-54</td>
-            <td>6,031</td>
-            <td>0</td>
-            <td>2,974</td>
-            <td class="pos">+34</td>
-            <td>8,511</td>
-            <td class="pos">+260</td>
-          </tr>
-          <tr class="">
-            <td>W13</td>
-            <td>03-23 ~ 03-29</td>
-            <td>607</td>
-            <td class="neg">-769</td>
-            <td>6,031</td>
-            <td>0</td>
-            <td>2,940</td>
-            <td class="pos">+6</td>
-            <td>8,251</td>
-            <td class="pos">+181</td>
-          </tr>
-          <tr class="">
-            <td>W12</td>
-            <td>03-16 ~ 03-22</td>
-            <td>1,376</td>
-            <td class="neg">-355</td>
-            <td>6,031</td>
-            <td>0</td>
-            <td>2,934</td>
-            <td class="pos">+828</td>
-            <td>8,070</td>
-            <td class="pos">+411</td>
-          </tr>
-          <tr class="">
-            <td>W11</td>
-            <td>03-09 ~ 03-15</td>
-            <td>1,731</td>
-            <td class="neg">-33</td>
-            <td>6,031</td>
-            <td>0</td>
-            <td>2,106</td>
-            <td class="pos">+33</td>
-            <td>7,659</td>
-            <td class="pos">+101</td>
-          </tr>
-          <tr class="">
-            <td>W10</td>
-            <td>03-02 ~ 03-08</td>
-            <td>1,764</td>
-            <td class="pos">+422</td>
-            <td>6,031</td>
-            <td>0</td>
-            <td>2,073</td>
-            <td class="pos">+46</td>
-            <td>7,558</td>
-            <td class="pos">+76</td>
-          </tr>
-          <tr class="">
-            <td>W09</td>
-            <td>02-23 ~ 03-01</td>
-            <td>1,342</td>
-            <td class="pos">+1,010</td>
-            <td>2,714</td>
-            <td>0</td>
-            <td>2,027</td>
-            <td class="pos">+39</td>
-            <td>7,482</td>
-            <td class="pos">+76</td>
-          </tr>
-          <tr class="">
-            <td>W08</td>
-            <td>02-16 ~ 02-22</td>
-            <td>332</td>
-            <td class="neg">-216</td>
-            <td>2,714</td>
-            <td>0</td>
-            <td>1,988</td>
-            <td class="pos">+2</td>
-            <td>7,406</td>
-            <td class="pos">+105</td>
-          </tr>
-          <tr class="">
-            <td>W07</td>
-            <td>02-09 ~ 02-15</td>
-            <td>548</td>
-            <td class="pos">+56</td>
-            <td>2,714</td>
-            <td>0</td>
-            <td>1,986</td>
-            <td class="pos">+17</td>
-            <td>7,301</td>
-            <td class="pos">+171</td>
-          </tr>
-          <tr class="">
-            <td>W06</td>
-            <td>02-02 ~ 02-08</td>
-            <td>492</td>
-            <td class="pos">+104</td>
-            <td>2,714</td>
-            <td>0</td>
-            <td>1,969</td>
-            <td class="pos">+10</td>
-            <td>7,130</td>
-            <td class="pos">+152</td>
-          </tr>
-          <tr class="">
-            <td>W05</td>
-            <td>01-26 ~ 02-01</td>
-            <td>388</td>
-            <td class="neg">-164</td>
-            <td>1,963</td>
-            <td>0</td>
-            <td>1,959</td>
-            <td class="pos">+4</td>
-            <td>6,978</td>
-            <td class="pos">+169</td>
-          </tr>
-          <tr class="">
-            <td>W04</td>
-            <td>01-19 ~ 01-25</td>
-            <td>552</td>
-            <td class="pos">+85</td>
-            <td>1,963</td>
-            <td>0</td>
-            <td>1,955</td>
-            <td class="pos">+12</td>
-            <td>6,809</td>
-            <td class="pos">+93</td>
-          </tr>
-          <tr class="">
-            <td>W03</td>
-            <td>01-12 ~ 01-18</td>
-            <td>467</td>
-            <td class="neg">-89</td>
-            <td>1,963</td>
-            <td>0</td>
-            <td>1,943</td>
-            <td class="pos">+7</td>
-            <td>6,716</td>
-            <td class="pos">+150</td>
-          </tr>
-          <tr class="">
-            <td>W02</td>
-            <td>01-05 ~ 01-11</td>
-            <td>556</td>
-            <td class="pos">+259</td>
-            <td>1,963</td>
-            <td>0</td>
-            <td>1,936</td>
-            <td class="pos">+4</td>
-            <td>6,566</td>
-            <td class="pos">+176</td>
-          </tr>
+          ${weekly.slice().reverse().map((d, i) => `
+          <tr class="${i === 0 ? 'latest' : ''}">
+            <td>${weekLabel(d.week)}</td>
+            <td>${d.period.replace('2026-', '').replace(/ ~ 2026-/, ' ~ ')}</td>
+            <td>${d.webSessions.toLocaleString()}</td>
+            <td class="${d.webDiff > 0 ? 'pos' : d.webDiff < 0 ? 'neg' : ''}">${sign(d.webDiff)}</td>
+            <td>${d.webMonthly.toLocaleString()}</td>
+            <td>${d.consult !== null ? d.consult : '<span class="null">—</span>'}</td>
+            <td>${d.nlSubs.toLocaleString()}</td>
+            <td class="${d.nlDiff > 0 ? 'pos' : d.nlDiff < 0 ? 'neg' : ''}">${sign(d.nlDiff)}</td>
+            <td>${d.ytSubs.toLocaleString()}</td>
+            <td class="${d.ytDiff > 0 ? 'pos' : d.ytDiff < 0 ? 'neg' : ''}">${sign(d.ytDiff)}</td>
+          </tr>`).join('')}
         </tbody>
       </table>
     </div>
@@ -616,8 +529,8 @@ Chart.defaults.borderColor = '#2c2c2e';
 Chart.defaults.font.family = "-apple-system, 'Apple SD Gothic Neo', 'Pretendard', sans-serif";
 Chart.defaults.font.size = 12;
 
-const weekLabels = ["W02","W03","W04","W05","W06","W07","W08","W09","W10","W11","W12","W13","W14","W15","W16","W17","W18"];
-const monthLabels = ["1월","2월","3월","4월"];
+const weekLabels = ${weekLabels};
+const monthLabels = ${monthLabels};
 
 // ── 홈페이지 주간 유입 (복합: 막대 + 꺾은선)
 new Chart(document.getElementById('chartWebWeekly'), {
@@ -627,7 +540,7 @@ new Chart(document.getElementById('chartWebWeekly'), {
       {
         type: 'bar',
         label: '주간 유입수',
-        data: [556,467,552,388,492,548,332,1342,1764,1731,1376,607,553,410,687,297,280],
+        data: ${webSessionsData},
         backgroundColor: 'rgba(10,132,255,0.3)',
         borderColor: '#0a84ff',
         borderWidth: 1.5,
@@ -637,7 +550,7 @@ new Chart(document.getElementById('chartWebWeekly'), {
       {
         type: 'line',
         label: '전주 대비',
-        data: [259,-89,85,-164,104,56,-216,1010,422,-33,-355,-769,-54,-143,277,-395,-17],
+        data: ${webDiffData},
         borderColor: '#ffd60a',
         backgroundColor: 'rgba(255,214,10,0.1)',
         borderWidth: 2,
@@ -668,7 +581,7 @@ new Chart(document.getElementById('chartNlWeekly'), {
     labels: weekLabels,
     datasets: [{
       label: '구독자 수',
-      data: [1936,1943,1955,1959,1969,1986,1988,2027,2073,2106,2934,2940,2974,3002,3127,3139,3146],
+      data: ${nlSubsData},
       borderColor: '#bf5af2',
       backgroundColor: 'rgba(191,90,242,0.1)',
       borderWidth: 2.5,
@@ -695,7 +608,7 @@ new Chart(document.getElementById('chartYtWeekly'), {
     labels: weekLabels,
     datasets: [{
       label: '구독자 수',
-      data: [6566,6716,6809,6978,7130,7301,7406,7482,7558,7659,8070,8251,8511,8690,9040,9160,9260],
+      data: ${ytSubsData},
       borderColor: '#ff453a',
       backgroundColor: 'rgba(255,69,58,0.1)',
       borderWidth: 2.5,
@@ -716,7 +629,7 @@ new Chart(document.getElementById('chartYtWeekly'), {
 });
 
 // ── 뉴스레터 순증분
-const nlDiffData = [4,7,12,4,10,17,2,39,46,33,828,6,34,28,138,13,7];
+const nlDiffData = ${nlDiffData};
 new Chart(document.getElementById('chartNlDiff'), {
   type: 'bar',
   data: {
@@ -741,7 +654,7 @@ new Chart(document.getElementById('chartNlDiff'), {
 });
 
 // ── 유튜브 순증분
-const ytDiffData = [176,150,93,169,152,171,105,76,76,101,411,181,260,179,350,120,100];
+const ytDiffData = ${ytDiffData};
 new Chart(document.getElementById('chartYtDiff'), {
   type: 'bar',
   data: {
@@ -772,7 +685,7 @@ new Chart(document.getElementById('chartMonthly'), {
     labels: monthLabels,
     datasets: [{
       label: '월간 누적 유입',
-      data: [1963,2714,6031,1674],
+      data: ${monthWebData},
       backgroundColor: 'rgba(10,132,255,0.45)',
       borderColor: '#0a84ff',
       borderWidth: 1.5,
@@ -790,4 +703,31 @@ new Chart(document.getElementById('chartMonthly'), {
 });
 </script>
 </body>
-</html>
+</html>`;
+}
+
+async function main() {
+  console.log('\n📊 KGI 대시보드 HTML 생성 중...');
+  console.log('  Google Sheets 데이터 읽는 중...');
+
+  const rows = await fetchSheetData();
+  console.log(`  ${rows.length}행 읽음`);
+
+  const data = processData(rows);
+  console.log(`  주간 ${data.weekly.length}주, 월별 ${data.monthly.length}개월 처리 완료`);
+
+  const html = generateHTML(data);
+
+  fs.mkdirSync(path.dirname(OUTPUT_PATH), { recursive: true });
+  fs.writeFileSync(OUTPUT_PATH, html, 'utf8');
+
+  console.log(`\n  ✅ 대시보드 생성 완료`);
+  console.log(`  📂 ${OUTPUT_PATH}`);
+  console.log('\n');
+}
+
+main().catch(e => {
+  console.error('❌ 오류:', e.message);
+  if (e.response?.data) console.error(JSON.stringify(e.response.data, null, 2));
+  process.exit(1);
+});
